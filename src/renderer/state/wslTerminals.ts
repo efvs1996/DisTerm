@@ -11,6 +11,8 @@ import { isWslShellValue, parseWslShell } from '@shared/terminal-profiles'
 export interface WslTerminalRow {
   label: string
   shell: string
+  /** The distribution `wsl.exe` starts by default. */
+  isDefault?: true
 }
 
 const NONE: readonly WslTerminalRow[] = []
@@ -29,7 +31,7 @@ export const useWslTerminals = create<{
   publish: (profiles) => {
     const rows = profiles
       .filter((p) => p.kind === 'wsl')
-      .map((p) => ({ label: p.label, shell: p.value }))
+      .map((p) => ({ label: p.label, shell: p.value, ...(p.isDefault ? { isDefault: p.isDefault } : {}) }))
     set({ rows: rows.length > 0 ? rows : NONE })
   }
 }))

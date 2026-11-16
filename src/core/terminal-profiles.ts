@@ -4,6 +4,7 @@
 
 import { execFile } from 'child_process'
 import { wslShellValue, type TerminalProfile } from '../shared/terminal-profiles'
+import type { WslDistro } from '../shared/new-projects-wsl'
 import { windowsSystemDrive } from './win32-powershell'
 
 export interface ExecResult {
@@ -80,6 +81,32 @@ export async function listWslDistros(exec: ProfileExec = defaultExec): Promise<s
   }
 }
 
+/**
+ * The name on the row `wsl.exe --list --verbose` marks with `*`, the default distribution. The
+ * header is localized and the name can hold spaces, so this keys on the marker and drops the last
+ * two columns (state, version).
+ */
+export function parseWslDefaultDistro(raw: Buffer): string | null {
+  for (const line of decodeWslOutput(raw).split(/\r?\n/)) {
+    const marked = /^\s*\*\s*(.+?)\s*$/.exec(line)?.[1]
+    if (marked) return (/^(.+?)\s+\S+\s+\S+$/.exec(marked)?.[1] ?? marked).trim()
+  }
+  return null
+}
+
+/** {@link listWslDistros}, each marked with whether it is WSL's default. `--verbose` starts nothing
+ *  either; when it fails, no distribution is marked. */
+export async function listWslDistrosWithDefault(
+  exec: ProfileExec = defaultExec
+): Promise<WslDistro[]> {
+  const [names, verbose] = await Promise.all([
+    listWslDistros(exec),
+    exec(wslExe(), ['--list', '--verbose'], WSL_LIST_TIMEOUT_MS).catch(() => null)
+  ])
+  const marked = verbose?.code === 0 ? parseWslDefaultDistro(verbose.stdout)?.toLowerCase() : undefined
+  return names.map((name) => ({ name, isDefault: name.toLowerCase() === marked }))
+}
+
 /** Distributions running now. `--running` starts nothing. Null: WSL did not answer, so nothing is
  *  known to be running. */
 export async function listRunningWslDistros(exec: ProfileExec = defaultExec): Promise<string[] | null> {
@@ -97,14 +124,19 @@ export async function listTerminalProfiles(
   exec: ProfileExec = defaultExec
 ): Promise<TerminalProfile[]> {
   if (platform !== 'win32') return []
-  const distros = await listWslDistros(exec)
+  const distros = await listWslDistrosWithDefault(exec)
   return [
     { value: '', label: 'System default', kind: 'default' },
     { value: 'pwsh', label: 'PowerShell 7', kind: 'windows' },
     { value: 'powershell', label: 'Windows PowerShell', kind: 'windows' },
     { value: 'cmd', label: 'Command Prompt', kind: 'windows' },
     ...distros.map(
-      (name): TerminalProfile => ({ value: wslShellValue(name), label: `WSL: ${name}`, kind: 'wsl' })
+      ({ name, isDefault }): TerminalProfile => ({
+        value: wslShellValue(name),
+        label: `WSL: ${name}`,
+        kind: 'wsl',
+        ...(isDefault ? { isDefault: true as const } : {})
+      })
     )
   ]
 }

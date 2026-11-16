@@ -32,7 +32,9 @@ app.on('child-process-gone', (_event, details) => {
   console[level](`[process] ${msg}`)
 })
 import { nativeMux, setNativeWindowsAgentOptIn, useNativeSsh } from '../core/remote-ssh/native/native-runtime'
-import { wslEndpoints } from '../core/remote-ssh/native/wsl-endpoint'
+import { wslEndpoints, wslProfileExec, wslRunner } from '../core/remote-ssh/native/wsl-endpoint'
+import { listWslDistrosWithDefault, wslExe } from '../core/terminal-profiles'
+import { newProjectFolderStart, WslHomes } from '../core/wsl-new-projects'
 import { writeFilesToClipboard } from './clipboard-files'
 import { writeWindowsFileDrop } from './clipboard-files-win'
 import { micConsentDecision, micSettingsUrl } from './mic-consent'
@@ -2439,8 +2441,21 @@ app.whenReady().then(async () => {
     stationHandovers.onHandover(ev)
   }
 
-  ipcMain.handle(IPC.dialogSelectFolder, async () => {
-    const result = await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] })
+  const wslHomes = new WslHomes(wslRunner(wslExe()))
+  ipcMain.handle(IPC.dialogSelectFolder, async (_event, purpose?: unknown) => {
+    const defaultPath =
+      purpose === 'new-project'
+        ? await newProjectFolderStart({
+            platform: process.platform,
+            settings: settingsStore.get(),
+            distros: () => listWslDistrosWithDefault(wslProfileExec),
+            homes: wslHomes
+          })
+        : undefined
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      ...(defaultPath ? { defaultPath } : {})
+    })
     return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
   })
 

@@ -1659,8 +1659,9 @@ export interface WorktreeApi {
 }
 
 export interface DialogApi {
-  /** Opens a native folder picker; returns the chosen path or null if cancelled. */
-  selectFolder(): Promise<string | null>
+  /** Opens a native folder picker; returns the chosen path or null if cancelled. `'new-project'`
+   *  lets the desktop start it in WSL (`settings.newProjectsInWsl`); the in-app picker ignores it. */
+  selectFolder(purpose?: 'new-project'): Promise<string | null>
   /** Opens a native file picker; returns the chosen path or null if cancelled. */
   selectFile(): Promise<string | null>
 }
@@ -2171,6 +2172,15 @@ export interface Settings {
    * Logic: core/remote-ssh/native/wsl-endpoint.ts.
    */
   wslKeepDistroRunning: boolean
+  /**
+   * Windows desktop: a new project's terminals run in a WSL distribution, starting in its Linux home,
+   * and "Open folder…" starts in that home. A no-op with no distribution, off Windows and on the
+   * Server Edition. Applied as the project's LOCAL `terminal.shell`, never its shared file. Off is
+   * the behavior from before it existed. Logic: shared/new-projects-wsl.ts, core/wsl-new-projects.ts.
+   */
+  newProjectsInWsl: boolean
+  /** The distribution for {@link newProjectsInWsl}. Empty means WSL's default distribution. */
+  newProjectsWslDistro: string
   /** Plain mouse wheel zooms the canvas (no Cmd/Ctrl needed). On macOS a two-finger trackpad
    *  scroll keeps panning independently (see canvas/wheel-gesture.ts), so mouse and trackpad
    *  coexist; elsewhere this still trades away scroll-to-pan, so it stays opt-in. */
@@ -2582,6 +2592,8 @@ export const DEFAULT_SETTINGS: Settings = {
   terminalFontZoomKeys: false,
   windowsSshAgentAddKeys: false,
   wslKeepDistroRunning: true,
+  newProjectsInWsl: true,
+  newProjectsWslDistro: '',
   wheelZoom: false,
   wheelZoomSpeed: 1,
   trackpadPan: true,

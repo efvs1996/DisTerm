@@ -202,6 +202,41 @@ the Windows one, got nothing, and the pill vanished.
   not running. **NOT measured:** a packaged app: the rows, the typed line, a cold restore after a reboot, or a cold
   boot's wait. A fish login shell is covered only by a stand-in that fails the way fish is expected to.
 
+### New projects in WSL
+
+On a Windows desktop with a distribution, a new project lives in WSL by default
+(`settings.newProjectsInWsl`, machine-local, on; `newProjectsWslDistro`, empty for WSL's default). Settings
+→ Shell has the row, shown only on a Windows desktop that lists a distribution.
+- **The seam is the project's LOCAL `terminal.shell`**, written once after the project's first save
+  (`renderer/lib/newProjectShell.ts`; the core's index must hold the entry before `updateLocal` lands).
+  Every reader already honors it: the spawn (`project-spawn-overrides.ts`, a local value runs with no
+  trust prompt), `paneRunsInWsl`, `wslShellForNewAgent`, the usage pill. It is never written to the shared
+  `.nodeterm/settings.json`, and a shell already in the overlay is kept. The project settings panel's
+  "This machine" shell row is how a person moves one project back to Windows.
+- **New project** (no folder): the chosen distribution, else WSL's default, else the first listed. A
+  `wsl:` launch with no cwd starts in `$HOME` (the guard's `${1:-$HOME}`). The default is the row
+  `wsl.exe --list --verbose` stars (`parseWslDefaultDistro`), which starts nothing; the header is
+  localized, so only the marker is read. Docker Desktop's distributions are filtered as in the picker, and
+  a default that is one of them falls through to the first listed distribution: measured through real
+  `wsl.exe` (Linux node over WSL interop) on a machine whose starred row was `docker-desktop`, which chose `Ubuntu`.
+- **Open folder…** starts at `\\wsl.localhost\<distro>\<home>` (`core/wsl-new-projects.ts`). Learning the
+  home starts the distribution, so it is asked only when this picker opens with the setting on, through
+  `wslRunner` with a 5 s hard limit, and cached per distribution for the app run; a miss is not cached
+  and opens the picker where it always opened. Measured the same way on a running Ubuntu:
+  `\\wsl.localhost\Ubuntu\home\<user>` in 115 ms, 0 ms from the cache. Only the project "Open folder…" passes
+  `selectFolder('new-project')`: a downloads or clone folder picker never starts in WSL.
+- **A folder opened inside WSL** (`\\wsl.localhost\<distro>\...` or `\\wsl$\...`, picked or dropped) gets the
+  distribution it is in, when it is listed; a Windows folder keeps the Windows shell. `wslpath -a -u`
+  already maps that UNC path to the Linux one (`\\wsl.localhost\Ubuntu\home\<user>` gave `/home/<user>`, measured). Only a project
+  created by this open gets it: reusing or reopening an existing one changes nothing.
+- **Off is the old behavior exactly**, and so is no distribution, a non-Windows core, a browser tab
+  (Server Edition) and a relay tab. A relay Editor could not store a `wsl:` overlay anyway (`access-policy.ts`).
+- **Known gaps:** a project created before the distribution list arrives (Canvas lists it once at startup)
+  gets the Windows shell. An adopted WSL folder whose `project.json` already holds terminals can mount
+  them before the overlay lands, and those start with the Windows shell. **NOT measured:** any of this in
+  the packaged app on a real Windows machine (the picker opening at that folder, `--verbose` on a
+  non-English Windows, the home probe's time on a stopped distribution).
+
 ### WSL projects: a distribution as an SSH project
 
 A WSL project is an SSH project whose host is a distribution on this machine, so agents in WSL get

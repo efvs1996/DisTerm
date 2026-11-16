@@ -5,6 +5,8 @@ import * as path from 'path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   listTerminalProfiles,
+  listWslDistrosWithDefault,
+  parseWslDefaultDistro,
   parseWslDistroList,
   resolveWslLaunch,
   WSL_CWD_GUARD,
@@ -28,6 +30,66 @@ describe('parseWslDistroList', () => {
   it('reads UTF-8 output (WSL_UTF8=1), a BOM, and a name with spaces', () => {
     expect(parseWslDistroList(Buffer.from('My Distro\nDebian\n'))).toEqual(['My Distro', 'Debian'])
     expect(parseWslDistroList(utf16('\ufeffUbuntu\r\n'))).toEqual(['Ubuntu'])
+  })
+})
+
+describe('parseWslDefaultDistro', () => {
+  it('reads the starred row of --verbose, a name with spaces included', () => {
+    const raw = utf16('  NAME          STATE      VERSION\r\n  Debian        Stopped    2\r\n* My Distro     Running    2\r\n')
+    expect(parseWslDefaultDistro(raw)).toBe('My Distro')
+  })
+
+  it('reads the output measured on a machine whose default is Docker Desktop’s', () => {
+    const raw = utf16(
+      '  NAME                         STATE           VERSION\r\n' +
+        '* docker-desktop               Stopped         2\r\n' +
+        '  Ubuntu                       Running         2\r\n' +
+        '  RedHatEnterpriseLinux-9.8    Stopped         2\r\n'
+    )
+    expect(parseWslDefaultDistro(raw)).toBe('docker-desktop')
+  })
+
+  it('answers null when no row is starred', () => {
+    expect(parseWslDefaultDistro(utf16('  NAME  STATE  VERSION\r\n  Ubuntu  Stopped  2\r\n'))).toBeNull()
+  })
+})
+
+describe('listWslDistrosWithDefault', () => {
+  const byArgs: ProfileExec = async (_file, args) =>
+    args.includes('--verbose')
+      ? ok(utf16('  NAME      STATE      VERSION\r\n* ubuntu    Stopped    2\r\n  Debian    Stopped    2\r\n'))
+      : ok(utf16('docker-desktop\r\nUbuntu\r\nDebian\r\n'))
+
+  it('marks the default among the listed distributions', async () => {
+    await expect(listWslDistrosWithDefault(byArgs)).resolves.toEqual([
+      { name: 'Ubuntu', isDefault: true },
+      { name: 'Debian', isDefault: false }
+    ])
+  })
+
+  it('marks none when the default has no user shell', async () => {
+    const exec: ProfileExec = async (_file, args) =>
+      args.includes('--verbose')
+        ? ok(utf16('  NAME   STATE   VERSION\r\n* docker-desktop   Stopped   2\r\n  Ubuntu   Running   2\r\n'))
+        : ok(utf16('docker-desktop\r\nUbuntu\r\n'))
+    await expect(listWslDistrosWithDefault(exec)).resolves.toEqual([{ name: 'Ubuntu', isDefault: false }])
+  })
+
+  it('still lists them when --verbose fails', async () => {
+    const exec: ProfileExec = async (file, args) =>
+      args.includes('--verbose') ? Promise.reject(new Error('timeout')) : byArgs(file, args, 0)
+    await expect(listWslDistrosWithDefault(exec)).resolves.toEqual([
+      { name: 'Ubuntu', isDefault: false },
+      { name: 'Debian', isDefault: false }
+    ])
+  })
+
+  it('carries the mark onto the shell picker row', async () => {
+    const rows = await listTerminalProfiles('win32', byArgs)
+    expect(rows.filter((r) => r.kind === 'wsl')).toEqual([
+      { value: 'wsl:Ubuntu', label: 'WSL: Ubuntu', kind: 'wsl', isDefault: true },
+      { value: 'wsl:Debian', label: 'WSL: Debian', kind: 'wsl' }
+    ])
   })
 })
 

@@ -27,6 +27,16 @@ describe('the WSL rows every new-terminal surface reads', () => {
     expect(useWslTerminals.getState().rows).toEqual(UBUNTU)
   })
 
+  it('keeps which distribution is WSL’s default', () => {
+    useWslTerminals
+      .getState()
+      .publish([...WINDOWS_PROFILES, { value: 'wsl:Debian', label: 'WSL: Debian', kind: 'wsl', isDefault: true }])
+    expect(useWslTerminals.getState().rows).toEqual([
+      ...UBUNTU,
+      { label: 'WSL: Debian', shell: 'wsl:Debian', isDefault: true }
+    ])
+  })
+
   it('offers nothing when the core lists no profiles, which is every core but Windows', () => {
     projects([{ id: 'local', nodes: [] }])
     useWslTerminals.getState().publish([])
