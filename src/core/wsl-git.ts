@@ -16,7 +16,7 @@
 
 import type { ExecFileOptions } from 'child_process'
 import { WSL_UNC_PATH as WSL_UNC } from '../shared/terminal-profiles'
-import { wslExe } from './terminal-profiles'
+import { decodeWslOutput, defaultProfileExec, wslExe, type ProfileExec } from './terminal-profiles'
 
 export interface WslRepoRef {
   distro: string
@@ -116,4 +116,31 @@ export function gitReadFailure(err: string): string | null {
   if (!text) return null
   if (/safe\.directory/i.test(text)) return text
   return /^fatal:/i.test(text) ? null : text
+}
+
+const WSL_HOME_TIMEOUT_MS = 10_000
+
+/** Prints the default distribution's name, then `~/projects` when it exists, else `~`. */
+const WSL_CLONE_PARENT_SCRIPT =
+  'p="$HOME/projects"; [ -d "$p" ] || p="$HOME"; printf "%s\\n%s" "$WSL_DISTRO_NAME" "$p"'
+
+/**
+ * Where a clone lands by default on a Windows core with WSL: the default distribution's
+ * `~/projects`, else its home, as a UNC path (`\\wsl.localhost\Ubuntu\home\me\projects`). Null on
+ * any other core, or when WSL has no distribution that answers.
+ */
+export async function wslDefaultCloneParent(
+  exec: ProfileExec = defaultProfileExec,
+  platform: NodeJS.Platform | string = process.platform
+): Promise<string | null> {
+  if (platform !== 'win32') return null
+  try {
+    const result = await exec(wslExe(), ['--exec', 'sh', '-c', WSL_CLONE_PARENT_SCRIPT], WSL_HOME_TIMEOUT_MS)
+    if (result.code !== 0) return null
+    const [distro, home] = decodeWslOutput(result.stdout).trim().split(/\r?\n/)
+    if (!distro || !SAFE_DISTRO.test(distro) || !home?.startsWith('/')) return null
+    return `\\\\wsl.localhost\\${distro}${home.replace(/\//g, '\\')}`
+  } catch {
+    return null
+  }
 }
