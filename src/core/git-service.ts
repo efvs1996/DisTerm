@@ -15,7 +15,7 @@ import { directExecutableInvocation } from './exec-path'
 import { ghPath } from './gh-path'
 import { gitEnv } from './git-env'
 import { worktreeTargetRefusal } from './worktree-target'
-import { gitReadFailure, localGitCommand } from './wsl-git'
+import { gitReadFailure, localGitCommand, wslDefaultCloneParent } from './wsl-git'
 import {
   isValidCloneUrl,
   expandCloneUrl,
@@ -718,9 +718,12 @@ export class GitService {
       return { ok: false, message: `Cannot create ${clonePath}: ${err.message}` }
     }
     return await new Promise<GitResult>((resolve) => {
-      const child = spawn('git', ['clone', '--progress', '--', url, clonePath], {
-        cwd: parentDir,
-        env: unattended ? { ...GIT_ENV, GCM_INTERACTIVE: 'never' } : GIT_ENV,
+      // A parent inside WSL clones with the distribution's own git (see wsl-git.ts for why).
+      const cmd = localGitCommand(parentDir, ['clone', '--progress', '--', url, clonePath], {
+        env: unattended ? { ...GIT_ENV, GCM_INTERACTIVE: 'never' } : GIT_ENV
+      })
+      const child = spawn(cmd.file, cmd.args, {
+        ...cmd.options,
         stdio: ['ignore', 'ignore', 'pipe']
       })
       rec.child = child
@@ -773,8 +776,11 @@ export class GitService {
     activeClone.child?.kill('SIGTERM')
   }
 
-  /** ~/projects when present, else the home dir. */
-  cloneDefaultParent(): string {
+  /** On Windows with WSL, the default distribution's ~/projects or home; else ~/projects when
+   *  present, else the home dir. */
+  async cloneDefaultParent(): Promise<string> {
+    const wsl = await wslDefaultCloneParent()
+    if (wsl) return wsl
     const p = path.join(os.homedir(), 'projects')
     try {
       if (fs.statSync(p).isDirectory()) return p

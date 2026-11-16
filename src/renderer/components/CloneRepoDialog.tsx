@@ -8,7 +8,9 @@ import {
   type CloneProgress
 } from '@shared/clone-url'
 
-const PARENT_KEY = 'nodeterm.cloneParent'
+// The last parent a clone succeeded in. `v2`: the default moved into WSL on Windows, and a folder
+// remembered before that would keep hiding it.
+const PARENT_KEY = 'nodeterm.cloneParent.v2'
 
 interface CloneRepoDialogProps {
   open: boolean

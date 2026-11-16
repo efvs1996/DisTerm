@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { gitReadFailure, localGitCommand, wslRepoRef } from './wsl-git'
+import { gitReadFailure, localGitCommand, wslDefaultCloneParent, wslRepoRef } from './wsl-git'
+import type { ProfileExec } from './terminal-profiles'
 
 const UNC = '\\\\wsl.localhost\\Ubuntu\\home\\me\\repo'
 
@@ -88,5 +89,64 @@ describe('gitReadFailure', () => {
   it('reports git never getting to answer', () => {
     expect(gitReadFailure('spawn git ENOENT')).toBe('spawn git ENOENT')
     expect(gitReadFailure('ssh: connect to host h port 22: Connection refused')).toContain('ssh')
+  })
+})
+
+describe('localGitCommand for a clone into WSL', () => {
+  it('clones with the distribution git, into the Linux path of the target', () => {
+    const parent = '\\\\wsl.localhost\\Ubuntu\\home\\me\\projects'
+    const cmd = localGitCommand(
+      parent,
+      ['clone', '--progress', '--', 'https://github.com/o/r.git', `${parent}\\r`],
+      {},
+      'win32'
+    )
+    expect(cmd.args).toEqual([
+      '-d', 'Ubuntu', '--exec', 'git', '-C', '/home/me/projects',
+      'clone', '--progress', '--', 'https://github.com/o/r.git', '/home/me/projects/r'
+    ])
+  })
+})
+
+describe('wslDefaultCloneParent', () => {
+  const answering = (stdout: string, code = 0): ProfileExec => async () => ({
+    code,
+    stdout: Buffer.from(stdout),
+    stderr: Buffer.alloc(0)
+  })
+
+  it('is the default distribution folder, as a UNC path', async () => {
+    expect(await wslDefaultCloneParent(answering('Ubuntu\n/home/me/projects'), 'win32')).toBe(
+      '\\\\wsl.localhost\\Ubuntu\\home\\me\\projects'
+    )
+  })
+
+  it('reads the UTF-16 wsl.exe can answer in', async () => {
+    const exec: ProfileExec = async () => ({
+      code: 0,
+      stdout: Buffer.from('Debian\n/home/me', 'utf16le'),
+      stderr: Buffer.alloc(0)
+    })
+    expect(await wslDefaultCloneParent(exec, 'win32')).toBe('\\\\wsl.localhost\\Debian\\home\\me')
+  })
+
+  it.each([
+    ['WSL failed', answering('', 1)],
+    ['no distribution name', answering('\n/home/me')],
+    ['an unsafe distribution name', answering('-rf\n/home/me')],
+    ['a home that is not a Linux path', answering('Ubuntu\nC:\\Users\\me')],
+    ['wsl.exe missing', (async () => { throw new Error('ENOENT') }) as ProfileExec]
+  ])('is null when %s', async (_, exec) => {
+    expect(await wslDefaultCloneParent(exec, 'win32')).toBeNull()
+  })
+
+  it('asks nothing on a core that is not Windows', async () => {
+    let asked = false
+    const exec: ProfileExec = async () => {
+      asked = true
+      return { code: 0, stdout: Buffer.from('Ubuntu\n/home/me'), stderr: Buffer.alloc(0) }
+    }
+    expect(await wslDefaultCloneParent(exec, 'linux')).toBeNull()
+    expect(asked).toBe(false)
   })
 })

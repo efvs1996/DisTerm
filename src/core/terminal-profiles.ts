@@ -55,7 +55,8 @@ export function parseWslDistroList(raw: Buffer): string[] {
     .filter((name) => name && !NON_SHELL_DISTROS.has(name.toLowerCase()))
 }
 
-const defaultExec: ProfileExec = (file, args, timeoutMs) =>
+/** Runs a command and resolves its exit code; only a failure to start rejects. */
+export const defaultProfileExec: ProfileExec = (file, args, timeoutMs) =>
   new Promise((resolve, reject) => {
     execFile(
       file,
@@ -72,7 +73,7 @@ const defaultExec: ProfileExec = (file, args, timeoutMs) =>
   })
 
 /** Distributions with a usable shell. No WSL installed is an empty list, not an error. */
-export async function listWslDistros(exec: ProfileExec = defaultExec): Promise<string[]> {
+export async function listWslDistros(exec: ProfileExec = defaultProfileExec): Promise<string[]> {
   try {
     const result = await exec(wslExe(), ['--list', '--quiet'], WSL_LIST_TIMEOUT_MS)
     return result.code === 0 ? parseWslDistroList(result.stdout) : []
@@ -97,7 +98,7 @@ export function parseWslDefaultDistro(raw: Buffer): string | null {
 /** {@link listWslDistros}, each marked with whether it is WSL's default. `--verbose` starts nothing
  *  either; when it fails, no distribution is marked. */
 export async function listWslDistrosWithDefault(
-  exec: ProfileExec = defaultExec
+  exec: ProfileExec = defaultProfileExec
 ): Promise<WslDistro[]> {
   const [names, verbose] = await Promise.all([
     listWslDistros(exec),
@@ -109,7 +110,7 @@ export async function listWslDistrosWithDefault(
 
 /** Distributions running now. `--running` starts nothing. Null: WSL did not answer, so nothing is
  *  known to be running. */
-export async function listRunningWslDistros(exec: ProfileExec = defaultExec): Promise<string[] | null> {
+export async function listRunningWslDistros(exec: ProfileExec = defaultProfileExec): Promise<string[] | null> {
   try {
     const result = await exec(wslExe(), ['--list', '--running', '--quiet'], WSL_LIST_TIMEOUT_MS)
     return result.code === 0 ? parseWslDistroList(result.stdout) : null
@@ -121,7 +122,7 @@ export async function listRunningWslDistros(exec: ProfileExec = defaultExec): Pr
 /** The picker's rows. Empty on a non-Windows core, where the shell stays a free-text setting. */
 export async function listTerminalProfiles(
   platform: NodeJS.Platform | string,
-  exec: ProfileExec = defaultExec
+  exec: ProfileExec = defaultProfileExec
 ): Promise<TerminalProfile[]> {
   if (platform !== 'win32') return []
   const distros = await listWslDistrosWithDefault(exec)
@@ -165,7 +166,7 @@ export async function wslLinuxPath(distro: string, path: string, exec: ProfileEx
 export async function resolveWslLaunch(
   distro: string,
   cwd: string | undefined,
-  exec: ProfileExec = defaultExec
+  exec: ProfileExec = defaultProfileExec
 ): Promise<WslLaunchPlan> {
   const linuxCwd = cwd ? await wslLinuxPath(distro, cwd, exec) : undefined
   return {
