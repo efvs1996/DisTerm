@@ -18,13 +18,16 @@ import type {
   AppSelfMemory,
   MemDisplay,
   MemInfo,
+  SessionGuestMemory,
   SessionHostOverhead,
   SessionMemoryRow,
   SessionMemoryReport
 } from '../shared/types'
 import { TMUX_SOCKET } from './tmux-naming'
 import { RMT_TMUX_SOCKET } from './remote-ssh/control-master'
+import { wslProfileExec, wslRunner } from './remote-ssh/native/wsl-endpoint'
 import type { SessionHostListing } from './session-host-client'
+import { listRunningWslDistros, wslExe } from './terminal-profiles'
 import { cimRows, powershellArgs, powershellExe } from './win32-powershell'
 
 export type { MemInfo, SessionMemoryRow, SessionMemoryReport }
@@ -766,6 +769,143 @@ function sampleApp(read: AppProcessReader): AppProcessSample[] | null {
   }
 }
 
+/**
+ * Every process in the distribution that carries a pane's `NODETERM_NODE_ID` (`wslHookEnv` forwards
+ * it through WSLENV), and every process's VmRSS, joined by pid in the parser. Two `grep`s over all
+ * of /proc instead of a loop per pid. `-z` anchors the name at an entry's start; the `2>/dev/null`
+ * hides the root-owned environs we may not read. Lines carry `NTWSL` because wsl.exe can mix its
+ * own UTF-16 notices into stdout, and the closing marker proves the stream was not cut short.
+ */
+export const WSL_GUEST_PROBE_SCRIPT = [
+  "grep -a -z -H '^NODETERM_NODE_ID=' /proc/[0-9]*/environ 2>/dev/null | tr '\\0' '\\n' | sed 's/^/NTWSL /'",
+  "grep -H '^VmRSS:' /proc/[0-9]*/status 2>/dev/null | sed 's/^/NTWSL /'",
+  'echo NTWSL-END'
+].join('\n')
+
+/** Under the 15 s table read: a stuck distro was measured hanging past 2 minutes, and the panel waits. */
+const WSL_GUEST_PROBE_TIMEOUT_MS = 10_000
+
+export interface WslGuestReader {
+  /** `wsl.exe --list --running`: never starts a distro. Null = WSL did not answer. */
+  running(): Promise<string[] | null>
+  /** `WSL_GUEST_PROBE_SCRIPT`'s raw stdout in `distro`; null = it failed or timed out. */
+  probe(distro: string): Promise<string | null>
+}
+
+export function defaultWslGuestReader(): WslGuestReader {
+  return {
+    running: () => listRunningWslDistros(wslProfileExec),
+    probe: async (distro) => {
+      const r = await wslRunner(wslExe())(['-d', distro, '--exec', 'sh', '-c', WSL_GUEST_PROBE_SCRIPT], {
+        timeoutMs: WSL_GUEST_PROBE_TIMEOUT_MS
+      })
+      return r.timedOut ? null : r.stdout.toString('latin1')
+    }
+  }
+}
+
+/** Per node id: summed VmRSS and the process count. Null when the end marker is missing. */
+export function parseWslGuestProbe(raw: string): Map<string, { kb: number; processes: number }> | null {
+  const lines = raw.replace(/\0/g, '').split(/\r?\n/)
+  if (!lines.some((l) => l.trim() === 'NTWSL-END')) return null
+  const owner = new Map<number, string>()
+  const rss = new Map<number, number>()
+  for (const line of lines) {
+    const env = /^NTWSL \/proc\/(\d+)\/environ:NODETERM_NODE_ID=(\S+)\s*$/.exec(line)
+    if (env) {
+      const pid = Number(env[1])
+      if (!owner.has(pid)) owner.set(pid, env[2])
+      continue
+    }
+    const st = /^NTWSL \/proc\/(\d+)\/status:VmRSS:\s+(\d+) kB\s*$/.exec(line)
+    if (st) rss.set(Number(st[1]), Number(st[2]))
+  }
+  const out = new Map<string, { kb: number; processes: number }>()
+  for (const [pid, nodeId] of owner) {
+    const kb = rss.get(pid)
+    // No status line: the process exited between the two greps.
+    if (kb === undefined) continue
+    const acc = out.get(nodeId) ?? { kb: 0, processes: 0 }
+    acc.kb += kb
+    acc.processes++
+    out.set(nodeId, acc)
+  }
+  return out
+}
+
+const WSL_IMAGE = /^wsl\.exe$/i
+
+function treeHasImage(
+  table: ReadonlyMap<number, ProcEntry>,
+  kids: ReadonlyMap<number, number[]>,
+  root: number,
+  image: RegExp
+): boolean {
+  const seen = new Set<number>()
+  const stack = [root]
+  while (stack.length > 0) {
+    const pid = stack.pop() as number
+    if (seen.has(pid)) continue
+    seen.add(pid)
+    const name = table.get(pid)?.name
+    if (name && image.test(name)) return true
+    for (const k of kids.get(pid) ?? []) stack.push(k)
+  }
+  return false
+}
+
+/**
+ * Give each WSL pane's row its in-distribution share (`SessionMemoryRow.guest`). Reads nothing when
+ * no row is a WSL pane, and probes only distros `--list --running` names, so the sweep never boots
+ * one. A node found in a distro that answered is measured even if another probe failed; a node found
+ * nowhere is `probe-failed` if any probe failed, else `not-linked`.
+ */
+export async function attachWslGuest(
+  rows: readonly SessionMemoryRow[],
+  entries: readonly ProcEntry[],
+  reader: WslGuestReader
+): Promise<SessionMemoryRow[]> {
+  const { table, kids } = indexProcesses(entries)
+  const wslRows = new Set(rows.filter((r) => treeHasImage(table, kids, r.panePid, WSL_IMAGE)).map((r) => r.session))
+  if (wslRows.size === 0) return [...rows]
+  let running: string[] | null
+  try {
+    running = await reader.running()
+  } catch {
+    running = null
+  }
+  // `listRunningWslDistros` already leaves out Docker Desktop's VMs, which hold no panes.
+  const answers = await Promise.all(
+    (running ?? []).map(async (distro) => {
+      try {
+        const raw = await reader.probe(distro)
+        return { distro, found: raw === null ? null : parseWslGuestProbe(raw) }
+      } catch {
+        return { distro, found: null }
+      }
+    })
+  )
+  const anyFailed = running === null || answers.some((a) => a.found === null)
+  const out = rows.map((row): SessionMemoryRow => {
+    if (!wslRows.has(row.session)) return row
+    let kb = 0
+    let processes = 0
+    const inDistros: string[] = []
+    for (const a of answers) {
+      const hit = a.found?.get(row.nodeId)
+      if (!hit) continue
+      kb += hit.kb
+      processes += hit.processes
+      inDistros.push(a.distro)
+    }
+    let guest: SessionGuestMemory
+    if (inDistros.length > 0) guest = { measured: true, distros: inDistros, mb: kbToMb(kb), processes }
+    else guest = { measured: false, reason: anyFailed ? 'probe-failed' : 'not-linked' }
+    return { ...row, guest, totalMb: row.totalMb + (guest.measured ? guest.mb : 0) }
+  })
+  return out.sort((a, b) => b.totalMb - a.totalMb)
+}
+
 export interface SessionHostMemoryDeps {
   /** The host's listing (`PtyManager.sessionHostListing()`); null = the read failed. */
   list: () => Promise<SessionHostListing | null>
@@ -776,6 +916,8 @@ export interface SessionHostMemoryDeps {
   platformName?: NodeJS.Platform
   /** nodeterm's own processes (desktop only). Absent → the report carries no `app` at all. */
   appProcesses?: AppProcessReader
+  /** WSL guest reads for `wsl:` panes. Default: the real wsl.exe on win32, none elsewhere. */
+  wslGuest?: WslGuestReader | null
 }
 
 /**
@@ -852,7 +994,10 @@ export async function collectSessionHostMemory(deps: SessionHostMemoryDeps): Pro
     if (panes.length === 0) return withApp(withUnmeasured({ ok: true, rows: [], mem }), null)
     return { ok: false, rows: [], mem }
   }
-  const report = withApp(withUnmeasured(buildReport(panes, table, mem)), table)
+  const built = buildReport(panes, table, mem)
+  const wslGuest = deps.wslGuest === undefined ? (platformName === 'win32' ? defaultWslGuestReader() : null) : deps.wslGuest
+  if (wslGuest) built.rows = await attachWslGuest(built.rows, table, wslGuest)
+  const report = withApp(withUnmeasured(built), table)
   // A session the host named but did not describe has a shell among the host's children that no
   // row excludes, so its memory would be booked as host overhead. Report nothing rather than that.
   // The same holds for a session outside the `nt-` namespace (the host accepts any name, and the

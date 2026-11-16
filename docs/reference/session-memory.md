@@ -206,6 +206,43 @@ about which machine they describe. Reading + parsing is `core/session-memory.ts`
   exactly the observed generation. Both legs merge (`mergeLocalLegs`): a leg that answered is never
   overridden by one that failed. The tmux path is untouched wherever the session host is not the
   backend (`PtyManager.sessionHostListing()` answers `undefined`).
+- **A `wsl:` pane's memory is inside the WSL VM, so its row carries a guest share
+  (`SessionMemoryRow.guest`, `attachWslGuest`).** The pane's Windows tree is only `wsl.exe` →
+  `wsl.exe` → `wslhost.exe` → `conhost.exe`; claude, its MCP children and the shell run in
+  `vmmemWSL`, which no Windows row reaches. Measured (N=1 machine, Windows 11, WSL 2.4.13, packaged
+  DisTerm, before this change): three WSL panes showed **~44 MB** each while their in-distro totals
+  were **660, 632 and 944 MB**, a 15 to 21 times under-report. The link is `NODETERM_NODE_ID`, which
+  `wslHookEnv` forwards through WSLENV, so every Linux process of that pane carries it in
+  `/proc/<pid>/environ`. Rules:
+  - **Only on the panel sweep**, and only when a row's tree holds `wsl.exe` (the CIM table has image
+    names). The pill's 30 s poll is `IPC.sessionMemoryHost`, which reads `MemInfo` only and never
+    reaches `collectSessionHostMemory`, so it spawns no `wsl.exe`. The welcome screen's one local sweep
+    per appearance pays it too.
+  - **Never boots a distro:** `listRunningWslDistros` first (which already drops Docker Desktop's
+    VMs), then ONE probe per running distro, in parallel, each through `wslRunner` with a 10 s hard
+    timeout. `WSL_GUEST_PROBE_SCRIPT` is two `grep`s over all of `/proc` (environ with `-z` so the
+    name is anchored at an entry's start, then every `VmRSS:`), joined by pid in
+    `parseWslGuestProbe`: three processes per distro, not three per pid. The prototype loop
+    (`tr`/`grep`/`awk` per pid) took 180 ms wall through `wsl.exe` for ~300 processes on that machine;
+    the two-grep form ran in 4 ms under a local `/bin/sh` on a 127-process WSL guest, NOT measured
+    through `wsl.exe` on Windows. Every line is `NTWSL`-prefixed and the stream must end in
+    `NTWSL-END`, because wsl.exe can mix UTF-16 notices into stdout and a cut stream is a failure.
+  - **Not measured is never 0.** `probe-failed` (the running list or a distro's probe failed or timed
+    out, and the node was found nowhere) and `not-linked` (every running distro answered and none
+    carries this node) keep the row at its Windows total and the panel says so in words.
+    `not-linked` is deliberately NOT a 0: a live WSL pane always runs at least its shell in there, so
+    no matching process means the id did not cross (a pane opened before `wslHookEnv`, a `wsl` typed
+    inside a PowerShell pane, a distro whose `grep` lacks `-z`), not that it holds nothing. A node
+    found in a distro that answered is measured even if another distro's probe failed. `totalMb`
+    includes the guest MB when measured, so the sort and the header total see it.
+  - **Surfaces.** Windows desktop, and any shell on Windows whose backend is the session host (same
+    core leg; a Server Edition on Windows is not run). Linux Server
+    Edition and macOS: no session host, no `wsl.exe`, nothing changes (`wslGuest` defaults to none
+    off win32). Panel-only UI: the kanban board shows no per-session memory. Mobile: N/A.
+  - **NOT measured:** the whole path in a packaged Windows app (the probe through real `wsl.exe`,
+    the panel's line). The real-machine check: open two `wsl:` panes running claude, open the panel,
+    compare each row's "in WSL" figure with `wsl -d <distro> --exec sh -c '<the script>'` summed by
+    hand, and kill `wsl.exe` mid-probe to see "could not measure".
 
 **Offscreen release makes the macOS reaper bug far more visible, and the two shipped days apart.**
 A node released while offscreen detaches its PTY client — so it becomes a DETACHED tmux session and

@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { IconClose, IconPower, IconReload } from './icons'
 import type { AgentState } from '@shared/agents/normalize'
+import type { SessionGuestMemory } from '@shared/types'
 import { formatBytes } from '@shared/fsLimits'
 import { useAgentStatus } from '../state/agentStatus'
 import { useProjects } from '../state/projects'
@@ -19,6 +20,7 @@ import { useSessionMemory } from '../state/sessionMemory'
 import {
   appGroupLabel,
   formatCpuTime,
+  guestLine,
   hostOverheadLabel,
   resolveSessionRows,
   totalMb
@@ -54,6 +56,17 @@ export interface SessionMemoryPanelProps {
  *  units read like the rest of the app. */
 function formatMb(mb: number): string {
   return formatBytes(mb * 1024 * 1024)
+}
+
+/** What a WSL pane runs inside the distribution: its Windows tree above is only wsl.exe. */
+function GuestLine({ guest }: { guest: SessionGuestMemory }): JSX.Element {
+  const { label, mb } = guestLine(guest)
+  return (
+    <div className="sessmem-row__kids">
+      └ {label}
+      {mb !== undefined && <> <span>{formatMb(mb)}</span></>}
+    </div>
+  )
 }
 
 /**
@@ -239,6 +252,7 @@ export function SessionMemoryPanel({
                 └ +{v.row.childCount} child processes <span>{formatMb(v.row.childrenMb)}</span>
               </div>
             )}
+            {v.row.guest && <GuestLine guest={v.row.guest} />}
           </li>
         ))}
       </ul>
