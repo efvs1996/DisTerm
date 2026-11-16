@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { appGroupLabel, formatCpuTime, hostOverheadLabel, resolveSessionRows, totalMb } from './sessionMemoryRows'
+import { appGroupLabel, formatCpuTime, guestLine, hostOverheadLabel, resolveSessionRows, totalMb } from './sessionMemoryRows'
 import type { SessionMemoryRow } from '@shared/types'
 
 const row = (nodeId: string, mb: number): SessionMemoryRow => ({
@@ -101,5 +101,18 @@ describe('"DisTerm itself" labels', () => {
     expect(formatCpuTime(720)).toBe('12m')
     expect(formatCpuTime(3725)).toBe('1h 02m')
     expect(formatCpuTime(-1)).toBe('0s')
+  })
+})
+
+describe('guestLine', () => {
+  it('names the distros and the process count, with the MB only when measured', () => {
+    expect(guestLine({ measured: true, distros: ['Ubuntu', 'Debian'], mb: 612, processes: 1 })).toEqual({
+      label: 'in WSL (Ubuntu, Debian), 1 process',
+      mb: 612
+    })
+    expect(guestLine({ measured: false, reason: 'not-linked' })).toEqual({
+      label: 'in WSL: not measured (open a new terminal to link it)'
+    })
+    expect(guestLine({ measured: false, reason: 'probe-failed' })).toEqual({ label: 'in WSL: could not measure' })
   })
 })

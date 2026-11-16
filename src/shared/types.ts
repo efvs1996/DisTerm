@@ -3325,10 +3325,25 @@ export interface SessionMemoryRow {
   /** Everything below it (MCP servers, headless browsers, …). */
   childrenMb: number
   childCount: number
+  /** `selfMb + childrenMb`, plus `guest.mb` when the guest share was measured. */
   totalMb: number
   /** `#{pane_current_command}` — the agent/shell label. */
   command: string
+  /** Windows only: the pane's shell tree is `wsl.exe`, so what it runs lives in the WSL VM, which
+   *  the Windows process table never shows. Absent = not a WSL pane. */
+  guest?: SessionGuestMemory
 }
+
+/**
+ * The share of a WSL pane that lives inside its distribution: every Linux process carrying the
+ * pane's `NODETERM_NODE_ID`, summed by VmRSS. Not measured is never 0: `probe-failed` = a distro
+ * that could hold it did not answer (timeout, WSL not answering); `not-linked` = every running
+ * distro answered and none carries this pane's id (a pane opened before the env was forwarded, or a
+ * `wsl` typed inside a Windows shell), while the pane certainly runs at least a shell in there.
+ */
+export type SessionGuestMemory =
+  | { measured: true; distros: string[]; mb: number; processes: number }
+  | { measured: false; reason: 'probe-failed' | 'not-linked' }
 
 /**
  * `ok: false` means the sweep could not run (no tmux binary, unreadable process table). It is NOT

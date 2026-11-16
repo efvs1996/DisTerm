@@ -260,6 +260,29 @@ describe('SessionMemoryPanel', () => {
     expect(host.querySelectorAll('.sessmem-row__kids')).toHaveLength(1)
   })
 
+  it('shows a WSL pane\'s in-distribution share, and says so when it could not be measured', () => {
+    mount({
+      rows: [
+        row({
+          nodeId: 't1',
+          selfMb: 10,
+          childrenMb: 34,
+          childCount: 3,
+          totalMb: 678,
+          guest: { measured: true, distros: ['Ubuntu'], mb: 634, processes: 3 }
+        }),
+        row({ nodeId: 't2', selfMb: 44, totalMb: 44, guest: { measured: false, reason: 'probe-failed' } })
+      ]
+    })
+    const lines = [...host.querySelectorAll('.sessmem-row__kids')].map((e) => e.textContent)
+    expect(lines).toEqual([
+      '└ +3 child processes 34.0 MB',
+      '└ in WSL (Ubuntu), 3 processes 634.0 MB',
+      '└ in WSL: could not measure'
+    ])
+    expect(host.querySelector('.sessmem-panel__total')?.textContent).toBe('722.0 MB')
+  })
+
   it('says it could not measure — never an empty list, never a zero', () => {
     // `loadedScope: ''` on purpose, and it is the realistic shape: the store's failure path sets
     // `ok:false, rows:[]` and leaves `loadedScope` where the last SUCCESSFUL sweep put it. So a

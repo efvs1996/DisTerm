@@ -5,7 +5,13 @@
 // orphan/closed-project policy is unit-testable without mounting anything.
 
 import type { AgentState } from '@shared/agents/normalize'
-import type { AppSelfGroup, Project, SessionHostOverhead, SessionMemoryRow } from '@shared/types'
+import type {
+  AppSelfGroup,
+  Project,
+  SessionGuestMemory,
+  SessionHostOverhead,
+  SessionMemoryRow
+} from '@shared/types'
 
 export interface SessionMemoryView {
   row: SessionMemoryRow
@@ -77,6 +83,17 @@ export function resolveSessionRows(
  */
 export function totalMb(views: readonly SessionMemoryView[], host?: SessionHostOverhead): number {
   return views.reduce((sum, v) => sum + v.row.totalMb, 0) + (host?.totalMb ?? 0)
+}
+
+/** A WSL pane's in-distribution line: its label, and the MB figure when there is one. Not measured
+ *  says so in words, because the row's total then holds only the Windows side. */
+export function guestLine(guest: SessionGuestMemory): { label: string; mb?: number } {
+  if (guest.measured) {
+    const n = guest.processes
+    return { label: `in WSL (${guest.distros.join(', ')}), ${n} process${n === 1 ? '' : 'es'}`, mb: guest.mb }
+  }
+  if (guest.reason === 'not-linked') return { label: 'in WSL: not measured (open a new terminal to link it)' }
+  return { label: 'in WSL: could not measure' }
 }
 
 /** The host line's label: `nodeterm session host (3 consoles)`. */
