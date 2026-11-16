@@ -56,7 +56,7 @@ export function parseWslDistroList(raw: Buffer): string[] {
 }
 
 /** Runs a command and resolves its exit code; only a failure to start rejects. */
-export const defaultProfileExec: ProfileExec = (file, args, timeoutMs) =>
+const defaultProfileExec: ProfileExec = (file, args, timeoutMs) =>
   new Promise((resolve, reject) => {
     execFile(
       file,
