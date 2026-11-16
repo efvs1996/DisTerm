@@ -7,14 +7,26 @@ import { SearchableRow } from '../SearchableRow'
 import { FieldRow } from '../FieldRow'
 import { Input } from '@renderer/ui/Input'
 import { Select } from '@renderer/ui/Select'
+import { Switch } from '@renderer/ui/Switch'
+import { parseWslShell } from '@shared/terminal-profiles'
+import { chooseNewProjectDistro } from '@shared/new-projects-wsl'
+import { isBrowserRuntime } from '../../../bridge/runtime'
+import { isWindowsPlatform } from '@shared/platform-utils'
 
 const ROWS = {
   shell: {
     title: 'Default shell',
     keywords: ['shell', 'bash', 'zsh', 'fish', 'default', 'wsl', 'powershell', 'cmd', 'ubuntu']
+  },
+  newProjectsInWsl: {
+    title: 'Start new projects in WSL',
+    keywords: ['wsl', 'new project', 'open folder', 'distribution', 'distro', 'linux', 'home', 'ubuntu']
   }
 }
-const ENTRIES = Object.values(ROWS)
+const ENTRIES =
+  typeof navigator !== 'undefined' && !isBrowserRuntime() && isWindowsPlatform()
+    ? Object.values(ROWS)
+    : [ROWS.shell]
 
 const CUSTOM = '__custom__'
 
@@ -22,8 +34,18 @@ export function ShellSection({ isActive }: { isActive: boolean }): React.JSX.Ele
   const defaultShell = useSettings((s) => s.settings.defaultShell)
   const update = useSettings((s) => s.update)
   const profiles = useTerminalProfiles(useCoreIsWindows() && isActive)
+  const newProjectsInWsl = useSettings((s) => s.settings.newProjectsInWsl)
+  const newProjectsWslDistro = useSettings((s) => s.settings.newProjectsWslDistro)
   const [customChosen, setCustomChosen] = useState(false)
   const custom = customChosen || !profiles.some((p) => p.value === defaultShell)
+  // The desktop's own distributions; a browser tab's new projects are the Server Edition's.
+  const distros = isBrowserRuntime()
+    ? []
+    : profiles.flatMap((p) => {
+        const name = p.kind === 'wsl' ? parseWslShell(p.value) : null
+        return name ? [{ name, isDefault: p.isDefault === true }] : []
+      })
+  const wslDefault = chooseNewProjectDistro(distros, '')
   return (
     <SettingsSection
       id="shell"
@@ -67,6 +89,37 @@ export function ShellSection({ isActive }: { isActive: boolean }): React.JSX.Ele
           }
         />
       </SearchableRow>
+      {distros.length > 0 ? (
+        <SearchableRow {...ROWS.newProjectsInWsl}>
+          <FieldRow
+            label="Start new projects in WSL"
+            description="On by default. A new project's terminals run in this distribution and start in its Linux home, and Open folder… starts there too. A folder you open inside WSL gets its own distribution; a Windows folder keeps the Windows shell. Each project keeps this as its own shell on this machine, which you can change in its settings. Off, new projects use the default shell above."
+            control={
+              <div className="flex items-center gap-2">
+                {newProjectsInWsl === true && (
+                  <Select
+                    aria-label="Distribution for new projects"
+                    value={newProjectsWslDistro}
+                    onChange={(e) => update({ newProjectsWslDistro: e.target.value })}
+                  >
+                    <option value="">{`Default (${wslDefault})`}</option>
+                    {distros.map((d) => (
+                      <option key={d.name} value={d.name}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+                <Switch
+                  checked={newProjectsInWsl === true}
+                  onChange={(v) => update({ newProjectsInWsl: v })}
+                  ariaLabel="Start new projects in WSL"
+                />
+              </div>
+            }
+          />
+        </SearchableRow>
+      ) : null}
     </SettingsSection>
   )
 }

@@ -881,6 +881,7 @@ import {
 } from '../state/viewMode'
 import { GlobalKanbanView } from '../components/kanban/GlobalKanbanView'
 import { useTerminalProfiles } from '../terminal/use-terminal-profiles'
+import { applyNewProjectShell, newProjectShellNow } from '../lib/newProjectShell'
 import { parseWslShell } from '@shared/terminal-profiles'
 import {
   mayStartWslTerminal,
@@ -18167,8 +18168,10 @@ export function Canvas() {
     commitActiveToStore()
     const project = useProjects.getState().addProject()
     useProjects.getState().setActive(project.id)
-    void writeDisk()
-  }, [commitActiveToStore, writeDisk])
+    const wslShell = session.source === 'relay' ? null : newProjectShellNow()
+    const saved = writeDisk()
+    if (wslShell) void saved.then((ok) => ok && applyNewProjectShell(api.projectSettings, project.id, wslShell))
+  }, [commitActiveToStore, writeDisk, session.source, api])
 
   /** The dedupe/reopen/adopt/create decision for a folder path, shared by the "Open folder…"
    *  dialog and the drag-and-drop entry point: a folder maps to one project, and this is the
@@ -18179,6 +18182,7 @@ export function Canvas() {
   const openOrAdoptFolder = useCallback(
     async (folder: string): Promise<boolean> => {
       commitActiveToStore()
+      let wslProject: { id: string; shell: string } | undefined
       // A folder maps to one project: reuse the already-registered one first…
       // A relay tab carries the HOST's cwd: the same path on two machines must not route a local
       // folder to another machine's tab (openFolderProject applies the same rule).
@@ -18219,20 +18223,25 @@ export function Canvas() {
         const g = opensProject(useProjects.getState().projects, action) ? gateProjectOpen() : true
         if (g !== true && !(await g)) return false
         commitActiveToStore()
-        if (probed) useProjects.getState().adoptProject({ ...probed, closed: false })
-        else useProjects.getState().openFolderProject(folder)
+        const known = new Set(useProjects.getState().projects.map((p) => p.id))
+        const opened = probed
+          ? useProjects.getState().adoptProject({ ...probed, closed: false })
+          : useProjects.getState().openFolderProject(folder)
+        const shell = !known.has(opened.id) && session.source !== 'relay' ? newProjectShellNow(folder) : null
+        if (shell) wslProject = { id: opened.id, shell }
       }
-      void writeDisk()
+      const saved = writeDisk()
+      if (wslProject && (await saved)) await applyNewProjectShell(api.projectSettings, wslProject.id, wslProject.shell)
       return true
     },
-    [commitActiveToStore, writeDisk, confirmHandedOffReopen]
+    [commitActiveToStore, writeDisk, confirmHandedOffReopen, session.source, api]
   )
 
   /** Returns true when a folder was picked (false on cancel, of the picker or of the project
    *  limit's dialog), so callers like the welcome screen can keep their overlay up until the
    *  picker actually resolves. */
   const addProjectFromFolder = useCallback(async (): Promise<boolean> => {
-    const folder = await window.nodeTerminal.dialog.selectFolder()
+    const folder = await window.nodeTerminal.dialog.selectFolder('new-project')
     if (!folder) return false
     return await openOrAdoptFolder(folder)
   }, [openOrAdoptFolder])

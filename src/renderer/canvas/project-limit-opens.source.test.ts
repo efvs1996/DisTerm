@@ -50,7 +50,7 @@ function expectCommitAfterGate(body: string, gate: number, mutation: string): vo
 
 describe('project-limit gate placement in Canvas', () => {
   it('New project: the gate comes first, then the synchronous add', () => {
-    const body = between('const addProject = useCallback(', '}, [commitActiveToStore, writeDisk])')
+    const body = between('const addProject = useCallback(', '}, [commitActiveToStore, writeDisk')
     const gate = expectGateRightBefore(body, "{ kind: 'new' }", 'useProjects.getState().addProject()')
     expect(body.indexOf('commitActiveToStore()')).toBeGreaterThan(gate)
   })
@@ -110,7 +110,7 @@ describe('project-limit gate placement in Canvas', () => {
     const guarded = src.match(/\? gateProjectOpen\(\) : true/g) ?? []
     expect(guarded.length).toBe(calls.length)
     const inPaths = [
-      between('const addProject = useCallback(', '}, [commitActiveToStore, writeDisk])'),
+      between('const addProject = useCallback(', '}, [commitActiveToStore, writeDisk'),
       between('const onRepoCloned = useCallback(', CALLBACK_END),
       between('const createSshProject = useCallback(', CALLBACK_END),
       between('const openOrAdoptFolder = useCallback(', CALLBACK_END),

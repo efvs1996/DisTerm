@@ -10,6 +10,8 @@ export interface TerminalProfile {
   value: string
   label: string
   kind: TerminalProfileKind
+  /** On the WSL row of the distribution `wsl.exe` starts by default. */
+  isDefault?: true
 }
 
 const WSL_PREFIX = 'wsl:'

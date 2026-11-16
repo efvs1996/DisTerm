@@ -4,18 +4,32 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ShellSection } from './ShellSection'
 
-const state = vi.hoisted(() => ({ defaultShell: '', update: vi.fn() }))
+const state = vi.hoisted(() => ({
+  defaultShell: '',
+  newProjectsInWsl: true,
+  newProjectsWslDistro: '',
+  update: vi.fn(),
+  profiles: [] as unknown[]
+}))
+const WSL_PROFILES = [
+  { value: '', label: 'System default', kind: 'default' },
+  { value: 'wsl:Ubuntu', label: 'WSL: Ubuntu', kind: 'wsl', isDefault: true }
+]
 
 vi.mock('../../../state/settings', () => ({
   useSettings: (selector: (s: unknown) => unknown) =>
-    selector({ settings: { defaultShell: state.defaultShell }, update: state.update })
+    selector({
+      settings: {
+        defaultShell: state.defaultShell,
+        newProjectsInWsl: state.newProjectsInWsl,
+        newProjectsWslDistro: state.newProjectsWslDistro
+      },
+      update: state.update
+    })
 }))
 vi.mock('../../../terminal/use-core-platform', () => ({ useCoreIsWindows: () => true }))
 vi.mock('../../../terminal/use-terminal-profiles', () => ({
-  useTerminalProfiles: () => [
-    { value: '', label: 'System default', kind: 'default' },
-    { value: 'wsl:Ubuntu', label: 'WSL: Ubuntu', kind: 'wsl' }
-  ]
+  useTerminalProfiles: () => state.profiles
 }))
 vi.mock('../SettingsSection', () => ({
   SettingsSection: ({ children }: { children: React.ReactNode }) => <div>{children}</div>
@@ -35,6 +49,9 @@ describe('ShellSection on a Windows core', () => {
 
   beforeEach(() => {
     state.defaultShell = ''
+    state.newProjectsInWsl = true
+    state.newProjectsWslDistro = ''
+    state.profiles = WSL_PROFILES
     state.update.mockReset()
     host = document.createElement('div')
     document.body.appendChild(host)
@@ -75,5 +92,39 @@ describe('ShellSection on a Windows core', () => {
     state.defaultShell = 'C:\\tools\\nu.exe'
     show()
     expect(textBox()?.value).toBe('C:\\tools\\nu.exe')
+  })
+
+  const newProjectsSwitch = (): HTMLButtonElement | null =>
+    host.querySelector('[aria-label="Start new projects in WSL"]')
+  const distroSelect = (): HTMLSelectElement | null =>
+    host.querySelector('[aria-label="Distribution for new projects"]')
+
+  it('names the distribution the default resolves to and stores a picked one', () => {
+    show()
+    expect(Array.from(distroSelect()!.options).map((o) => o.text)).toEqual(['Default (Ubuntu)', 'Ubuntu'])
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
+    act(() => {
+      setter?.call(distroSelect(), 'Ubuntu')
+      distroSelect()!.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(state.update).toHaveBeenCalledWith({ newProjectsWslDistro: 'Ubuntu' })
+  })
+
+  it('turns new projects in WSL off', () => {
+    show()
+    act(() => newProjectsSwitch()!.click())
+    expect(state.update).toHaveBeenCalledWith({ newProjectsInWsl: false })
+  })
+
+  it('hides the distribution list while off', () => {
+    state.newProjectsInWsl = false
+    show()
+    expect([!!newProjectsSwitch(), !!distroSelect()]).toEqual([true, false])
+  })
+
+  it('has no new-projects row on a machine with no distribution', () => {
+    state.profiles = WSL_PROFILES.filter((p) => p.kind !== 'wsl')
+    show()
+    expect([!!host.querySelector('select'), !!newProjectsSwitch()]).toEqual([true, false])
   })
 })
