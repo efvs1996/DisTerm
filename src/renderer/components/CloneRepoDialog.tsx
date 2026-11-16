@@ -7,10 +7,13 @@ import {
   deriveRepoDirName,
   type CloneProgress
 } from '@shared/clone-url'
+import { WSL_UNC_PATH } from '@shared/terminal-profiles'
 
-// The last parent a clone succeeded in. `v2`: the default moved into WSL on Windows, and a folder
-// remembered before that would keep hiding it.
+// The last parent a clone succeeded in. `v2`: on Windows the default moved into WSL, and a folder
+// remembered before that would keep hiding it. The legacy value is still used wherever the default
+// is not a WSL path (macOS, Linux, Windows without WSL), so nothing changes there.
 const PARENT_KEY = 'nodeterm.cloneParent.v2'
+const LEGACY_PARENT_KEY = 'nodeterm.cloneParent'
 
 interface CloneRepoDialogProps {
   open: boolean
@@ -54,7 +57,11 @@ export function CloneRepoDialog({ open, onClose, onCloned }: CloneRepoDialogProp
     urlRef.current?.focus()
     const remembered = localStorage.getItem(PARENT_KEY)
     if (remembered) setParent(remembered)
-    else void api.git.cloneDefaultParent().then((p) => setParent((cur) => cur || p))
+    else
+      void api.git.cloneDefaultParent().then((p) => {
+        const legacy = WSL_UNC_PATH.test(p) ? null : localStorage.getItem(LEGACY_PARENT_KEY)
+        setParent((cur) => cur || legacy || p)
+      })
   }, [open])
 
   // Progress stream — subscribed only while the dialog is open.
