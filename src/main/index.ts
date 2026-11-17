@@ -716,7 +716,18 @@ ptyManager.setRelayNodeResolver({
   refFor: (scopeId) => sshProjectManager?.spawnRefFor(scopeId),
   projectIsRemote: (projectId) => !!workspaceStore.projectTargetInfo(projectId)?.ssh
 })
-const gitService = new GitService()
+// Where a new project's folder starts on a Windows desktop with WSL (docs/reference/ssh-windows-wsl.md,
+// "New projects in WSL"): the picked distribution's home, never Docker Desktop's. "Open folder…" and
+// the clone dialog share it; undefined off Windows or with the switch off.
+const wslHomes = new WslHomes(wslRunner(wslExe()))
+const wslNewProjectStart = (): Promise<string | undefined> =>
+  newProjectFolderStart({
+    platform: process.platform,
+    settings: settingsStore.get(),
+    distros: () => listWslDistrosWithDefault(wslProfileExec),
+    homes: wslHomes
+  })
+const gitService = new GitService({ wslCloneParent: wslNewProjectStart })
 
 // Project setup/archive runner (SDD: 2026-08-19-project-settings-trust). The trust store is keyed
 // by LOCATION, never project id (hostile-project-json), so one instance covers every project.
@@ -2441,16 +2452,10 @@ app.whenReady().then(async () => {
     stationHandovers.onHandover(ev)
   }
 
-  const wslHomes = new WslHomes(wslRunner(wslExe()))
   ipcMain.handle(IPC.dialogSelectFolder, async (_event, purpose?: unknown) => {
     const defaultPath =
       purpose === 'new-project'
-        ? await newProjectFolderStart({
-            platform: process.platform,
-            settings: settingsStore.get(),
-            distros: () => listWslDistrosWithDefault(wslProfileExec),
-            homes: wslHomes
-          })
+        ? await wslNewProjectStart()
         : undefined
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],

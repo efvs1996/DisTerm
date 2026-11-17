@@ -225,6 +225,14 @@ On a Windows desktop with a distribution, a new project lives in WSL by default
   and opens the picker where it always opened. Measured the same way on a running Ubuntu:
   `\\wsl.localhost\Ubuntu\home\<user>` in 115 ms, 0 ms from the cache. Only the project "Open folder…" passes
   `selectFolder('new-project')`: a downloads or clone folder picker never starts in WSL.
+- **Clone repository** suggests the same folder as its parent (`GitService.cloneDefaultParent`, given
+  `wslNewProjectStart` by the desktop shell in `main/index.ts`), so it never lands in Docker Desktop's
+  distribution, which a first cut that asked `wsl.exe` with no `-d` did on a machine whose default was
+  `docker-desktop` (`\\wsl.localhost\docker-desktop\root`). With no WSL folder (switch off, no
+  distribution, macOS, Linux, Server Edition) it is `~/projects` or `~` as before. A clone into a WSL
+  folder runs the distribution's own git through `localGitCommand`. A folder remembered by the dialog
+  wins over the suggestion; the remembered folder from before WSL is read only where the suggestion is
+  not a WSL path.
 - **A folder opened inside WSL** (`\\wsl.localhost\<distro>\...` or `\\wsl$\...`, picked or dropped) gets the
   distribution it is in, when it is listed; a Windows folder keeps the Windows shell. `wslpath -a -u`
   already maps that UNC path to the Linux one (`\\wsl.localhost\Ubuntu\home\<user>` gave `/home/<user>`, measured). Only a project

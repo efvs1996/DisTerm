@@ -15,7 +15,7 @@ import { directExecutableInvocation } from './exec-path'
 import { ghPath } from './gh-path'
 import { gitEnv } from './git-env'
 import { worktreeTargetRefusal } from './worktree-target'
-import { gitReadFailure, localGitCommand, wslDefaultCloneParent } from './wsl-git'
+import { gitReadFailure, localGitCommand } from './wsl-git'
 import {
   isValidCloneUrl,
   expandCloneUrl,
@@ -230,7 +230,15 @@ function githubTokenFromGitCredentials(cwd: string): Promise<string | null> {
  * Per-project git operations using the system `git` (and `gh` for publishing).
  * The repo root is the active project's working directory.
  */
+export interface GitServiceDeps {
+  /** The folder new projects start in inside WSL, or undefined for none. Only the Windows desktop
+   *  shell provides it, so the Server Edition and macOS keep the home-dir default. */
+  wslCloneParent?: () => Promise<string | undefined>
+}
+
 export class GitService {
+  constructor(private readonly deps: GitServiceDeps = {}) {}
+
   registerIpc(): void {
     platform().handle(IPC.gitStatus, (cwd: string) => this.status(cwd))
     platform().handle(IPC.gitInit, (cwd: string) => this.init(cwd))
@@ -776,10 +784,10 @@ export class GitService {
     activeClone.child?.kill('SIGTERM')
   }
 
-  /** On Windows with WSL, the default distribution's ~/projects or home; else ~/projects when
-   *  present, else the home dir. */
+  /** Where new projects start in WSL when the shell provides it (the Windows desktop); else
+   *  ~/projects when present, else the home dir. */
   async cloneDefaultParent(): Promise<string> {
-    const wsl = await wslDefaultCloneParent()
+    const wsl = await this.deps.wslCloneParent?.().catch(() => undefined)
     if (wsl) return wsl
     const p = path.join(os.homedir(), 'projects')
     try {
